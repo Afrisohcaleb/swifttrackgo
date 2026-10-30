@@ -1,0 +1,8 @@
+Options -Indexes
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?:config|includes|database|storage|scripts)(?:/|$) - [F,L,NC]
+</IfModule>

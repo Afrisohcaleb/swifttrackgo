@@ -1,0 +1,32 @@
+# Environment
+.env
+
+# Uploads (user-generated)
+uploads/*
+!uploads/.htaccess
+!uploads/.gitkeep
+
+# Storage
+storage/logs/*
+!storage/logs/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dependencies
+vendor/
+node_modules/
+
+# Misc
+*.log
+*.bak
+*.tmp
