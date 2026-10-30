@@ -43,17 +43,21 @@ if ($_chatEnabled):
             <div style="text-align:center;padding:2rem 1rem">
                 <div style="font-size:2.5rem;margin-bottom:.75rem">💬</div>
                 <h3 style="margin:0 0 .4rem;font-size:1.1rem"><?= $_chatOnline ? 'We\'re here to help!' : 'We\'re away right now' ?></h3>
-                <p style="color:var(--muted);font-size:.9rem;margin:0 0 1.2rem"><?= $_chatOnline ? 'Send us a message and we\'ll reply shortly.' : 'Leave a message and we\'ll get back to you.' ?></p>
+                <p style="color:var(--muted);font-size:.9rem;margin:0 0 1.2rem">Enter your tracking number to start or continue a shipment conversation. Anyone with the tracking number can access its chat.</p>
                 <form id="stg-chat-start-form">
                     <p id="stg-chat-error" class="alert alert-danger stg-chat-error" role="alert" hidden></p>
-                    <input id="stg-chat-name" placeholder="Your name" required style="margin-bottom:.5rem">
-                    <textarea id="stg-chat-first-msg" placeholder="Type your message…" rows="3" required style="margin-bottom:.5rem;resize:vertical"></textarea>
-                    <button class="button" type="submit" style="width:100%">Start Chat</button>
+                    <input id="stg-chat-tracking-number" name="tracking_number" placeholder="Tracking number" maxlength="40" autocapitalize="characters" autocomplete="off" required style="margin-bottom:.5rem">
+                    <textarea id="stg-chat-first-msg" placeholder="Type a message to start a chat, or leave blank to continue…" rows="3" maxlength="2000" style="margin-bottom:.5rem;resize:vertical"></textarea>
+                    <button class="button" type="submit" style="width:100%">Open chat</button>
                 </form>
             </div>
         </div>
         <div id="stg-chat-conversation" class="stg-chat-view stg-chat-hidden">
             <p id="stg-chat-conversation-error" class="alert alert-danger stg-chat-error" role="alert" hidden></p>
+            <div style="padding:.45rem .75rem;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+                <small id="stg-chat-tracking-label"></small>
+                <button id="stg-chat-switch" type="button" class="button button-small button-secondary">Change number</button>
+            </div>
             <div id="stg-chat-messages"></div>
             <form id="stg-chat-send-form">
                 <div style="display:flex;gap:.4rem;padding:.6rem">
@@ -77,8 +81,11 @@ if ($_chatEnabled):
     var sendForm = document.getElementById('stg-chat-send-form');
     var messagesEl = document.getElementById('stg-chat-messages');
     var inputEl = document.getElementById('stg-chat-input');
+    var trackingInput = document.getElementById('stg-chat-tracking-number');
+    var trackingLabel = document.getElementById('stg-chat-tracking-label');
+    var switchButton = document.getElementById('stg-chat-switch');
     var conversationId = null;
-    var visitorToken = null;
+    var trackingNumber = null;
     var pollTimer = null;
     var statusTimer = null;
 
@@ -87,9 +94,10 @@ if ($_chatEnabled):
         var saved = sessionStorage.getItem('stg_chat');
         if (saved) {
             var data = JSON.parse(saved);
-            if (data.id && data.session) {
+            if (data.trackingNumber && data.id) {
                 conversationId = data.id;
-                visitorToken = data.session;
+                trackingNumber = data.trackingNumber;
+                trackingLabel.textContent = 'Shipment ' + trackingNumber;
             } else {
                 sessionStorage.removeItem('stg_chat');
             }
@@ -149,23 +157,41 @@ if ($_chatEnabled):
         setPanelOpen(false);
     });
 
+    switchButton.addEventListener('click', function(){
+        if (pollTimer) clearInterval(pollTimer);
+        conversationId = null;
+        trackingNumber = null;
+        messagesEl.innerHTML = '';
+        trackingInput.value = '';
+        document.getElementById('stg-chat-first-msg').value = '';
+        document.getElementById('stg-chat-error').hidden = true;
+        document.getElementById('stg-chat-conversation-error').hidden = true;
+        convoView.classList.add('stg-chat-hidden');
+        introView.classList.remove('stg-chat-hidden');
+        try { sessionStorage.removeItem('stg_chat'); } catch(e){}
+        trackingInput.focus();
+    });
+
     startForm.addEventListener('submit', function(e){
         e.preventDefault();
-        var name = document.getElementById('stg-chat-name').value.trim();
+        var tracking = trackingInput.value.trim().toUpperCase();
         var msg = document.getElementById('stg-chat-first-msg').value.trim();
-        if (!name || !msg) return;
+        if (!tracking) return;
+        document.getElementById('stg-chat-error').hidden = true;
         var fd = new FormData();
         fd.append('action', 'start');
-        fd.append('name', name);
+        fd.append('tracking_number', tracking);
         fd.append('message', msg);
         fd.append('csrf_token', csrfToken);
         fetch(apiUrl, { method: 'POST', body: fd })
         .then(function(r){ return r.json().then(function(data){ return {ok:r.ok, data:data}; }); })
         .then(function(data){
-            if (data.ok && data.data.conversation_id && data.data.session) {
+            if (data.ok && data.data.conversation_id && data.data.tracking_number) {
                 conversationId = data.data.conversation_id;
-                visitorToken = data.data.session;
-                try { sessionStorage.setItem('stg_chat', JSON.stringify({id: conversationId, session: visitorToken})); } catch(e){}
+                trackingNumber = data.data.tracking_number;
+                trackingLabel.textContent = 'Shipment ' + trackingNumber;
+                document.getElementById('stg-chat-first-msg').value = '';
+                try { sessionStorage.setItem('stg_chat', JSON.stringify({id: conversationId, trackingNumber: trackingNumber})); } catch(e){}
                 showConversation();
                 loadMessages();
             } else {
@@ -177,13 +203,13 @@ if ($_chatEnabled):
     sendForm.addEventListener('submit', function(e){
         e.preventDefault();
         var msg = inputEl.value.trim();
-        if (!msg || !conversationId) return;
+        if (!msg || !conversationId || !trackingNumber) return;
         inputEl.value = '';
         appendMessage(msg, 'visitor');
         var fd = new FormData();
         fd.append('action', 'send');
         fd.append('conversation_id', conversationId);
-        fd.append('session', visitorToken);
+        fd.append('tracking_number', trackingNumber);
         fd.append('message', msg);
         fd.append('csrf_token', csrfToken);
         fetch(apiUrl, { method: 'POST', body: fd })
@@ -206,8 +232,8 @@ if ($_chatEnabled):
     }
 
     function loadMessages(){
-        if (!conversationId || !visitorToken) return;
-        var query = new URLSearchParams({action:'messages', conversation_id:conversationId, session:visitorToken});
+        if (!conversationId || !trackingNumber) return;
+        var query = new URLSearchParams({action:'messages', tracking_number:trackingNumber});
         fetch(apiUrl + '?' + query.toString())
         .then(function(r){ return r.json(); })
         .then(function(data){

@@ -23,6 +23,14 @@ a { color: var(--brand-dark); }
 .button-secondary { background: white; color: var(--ink); border: 1px solid var(--line); }
 .button-small { min-height: 38px; padding: .45rem .8rem; }
 .hero { padding: 5.5rem 0 4rem; background: radial-gradient(ellipse at 82% 20%, #c9edf0 0, transparent 34%), linear-gradient(125deg, #f2f9fa, #fff 65%); }
+.hero-with-background {
+    background-image:
+        radial-gradient(ellipse at 82% 20%, rgba(201, 237, 240, .45) 0, transparent 34%),
+        linear-gradient(125deg, rgba(242, 249, 250, .88), rgba(255, 255, 255, .76) 65%),
+        var(--hero-background);
+    background-size: auto, auto, cover;
+    background-position: center, center, center;
+}
 .hero-grid { display: grid; grid-template-columns: 1.1fr .9fr; align-items: center; gap: 3.5rem; }
 .eyebrow { color: var(--brand); text-transform: uppercase; letter-spacing: .13em; font-weight: 800; font-size: .78rem; }
 h1, h2, h3 { line-height: 1.15; letter-spacing: -.035em; }
@@ -299,6 +307,29 @@ th { color: var(--muted); font-size: .85rem; }
     font-style: italic;
     margin: 0;
     flex: 1;
+}
+.settings-image-preview {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .35rem;
+    margin-top: .5rem;
+    color: var(--muted);
+    font-size: .82rem;
+    overflow-wrap: anywhere;
+}
+.settings-image-preview img {
+    display: block;
+    width: auto;
+    max-width: min(220px, 100%);
+    max-height: 120px;
+    object-fit: contain;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: white;
+    padding: .35rem;
 }
 
 @media (max-width: 780px) {

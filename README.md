@@ -7,11 +7,11 @@ Successfully implemented both requested features for SwiftTrackGo:
 ### ✅ Live Chat System
 - **Built-in chat widget** on all public pages (bottom-right floating button)
 - **Green dot indicator** showing support staff online/offline status
-- **No email required** - visitors can send messages using just their name
+- **No email required** - visitors start and resume conversations with a shipment tracking number
 - **Admin dashboard** (`/admin/chat.php`) for managing conversations
 - **Simple toggle** in admin settings (`/admin/settings.php`)
 - **Real-time messaging** with auto-refresh polling (5-second intervals)
-- **Session persistence** - returning visitors can continue conversations
+- **Cross-device continuation** - returning visitors can reopen a conversation with its tracking number
 
 ### ✅ Customer Reviews Section
 - **Added to homepage** displaying customer testimonials
@@ -53,11 +53,12 @@ Successfully implemented both requested features for SwiftTrackGo:
 
 #### Live Chat Widget
 - **Bubble button** in bottom-right corner with online/offline indicator
-- **Start chat form** (name + message, no email required)
+- **Start or resume chats** by tracking number
 - **Conversation view** with message history
 - **Auto-refresh** for new messages every 5 seconds
 - **Session storage** to reconnect returning visitors
 - **Admin controls** to toggle support status and close conversations
+- **Shipment association** so staff can identify chats by tracking number
 
 #### Reviews Section
 - **Review cards** with reviewer name, location, rating, and testimonial
@@ -132,8 +133,8 @@ The seeded testimonials are demo examples, not verified endorsements. The homepa
 ### 1. Chat Flow
 1. Visitor clicks chat bubble
 2. If no active conversation, shows start chat form
-3. Visitor enters name and message; no email is requested
-4. System creates conversation and stores message
+3. Visitor enters a shipment tracking number and optional message
+4. System creates or resumes that shipment's persistent conversation
 5. Visitor sees conversation view
 6. Support admin can reply from `/admin/chat.php`
 7. Real-time updates for both parties
@@ -166,6 +167,10 @@ For an existing database created before review moderation was added, import `dat
 
 For an existing database, also import `database/migrations/20261029_review_photos.sql` once to enable reviewer photos. Visitors can upload their own optional photo with a review (JPG, PNG, GIF, or WebP, up to 2 MB). Only use genuine customer-approved photos; the demo reviews do not have real portraits.
 
+Apply `database/migrations/20261030_chat_tracking_numbers.sql` once to an existing database to associate chat conversations with shipments. New databases already include this relationship in `database/swifttrackgo.sql`. Conversations created before this migration remain available to staff but are not attached to a shipment. Chat access uses the tracking number alone; anyone who knows it can read and send messages, so visitors should not share sensitive information in chat.
+
+Apply `database/migrations/20261030_chat_tracking_numbers.sql` once to an existing database so chat conversations can be associated with shipments. New databases already include this relationship in `database/swifttrackgo.sql`. Visitors can reopen the same conversation from another device by entering its tracking number. Anyone with that number can access the chat, so visitors should not share sensitive information there.
+
 ## Future Enhancements
 
 1. **Message threading** for multi-message conversations
@@ -182,7 +187,7 @@ To verify the system works:
 2. **Import the database** using: `mysql -u root < database/swifttrackgo.sql`
 3. **Navigate to the homepage** - reviews should be visible
 4. **Click the chat bubble** - widget should appear
-5. **Start a conversation** with just name and message
+5. **Start or continue a conversation** by entering a shipment tracking number
 6. **Access `/admin/chat.php`** to set support online and reply to conversations
 7. Submit a review from the homepage and approve it from `/admin/reviews.php`
 

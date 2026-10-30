@@ -11,6 +11,10 @@ $logoPath = $settings['logo_path'] ?: '';
 $faviconPath = $settings['favicon_path'] ?: '';
 $styleFile = BASE_PATH . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'css' . DIRECTORY_SEPARATOR . 'style.css';
 $styleVersion = is_file($styleFile) ? (string)filemtime($styleFile) : '1';
+$pageBackgroundPath = $settings['page_background_path'] ?: '';
+$pageBackgroundStyle = $pageBackgroundPath !== ''
+    ? 'background-image:linear-gradient(rgba(255,255,255,.92),rgba(255,255,255,.92)),url(' . json_encode(url($pageBackgroundPath), JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP) . ');background-size:cover;background-position:center;background-attachment:fixed;'
+    : '';
 ?>
 <!doctype html>
 <html lang="en">
@@ -19,13 +23,13 @@ $styleVersion = is_file($styleFile) ? (string)filemtime($styleFile) : '1';
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e($companyName) ?></title>
     <meta name="description" content="Track your shipment with <?= e($companyName) ?>.">
-    <?php if ($faviconPath !== ''): ?><link rel="icon" type="image/png" href="<?= e(url($faviconPath)) ?>"><?php endif; ?>
+    <?php if ($faviconPath !== ''): ?><link rel="icon" href="<?= e(url($faviconPath)) ?>"><?php endif; ?>
     <link rel="stylesheet" href="<?= e(url('assets/css/style.css') . '?v=' . $styleVersion) ?>">
     <style>
         :root { --brand: <?= e($primaryColor) ?>; --brand-dark: <?= e($secondaryColor) ?>; --accent: <?= e($accentColor) ?>; }
     </style>
 </head>
-<body>
+<body<?= $pageBackgroundStyle !== '' ? ' style="' . e($pageBackgroundStyle) . '"' : '' ?>>
 <header class="site-header">
     <div class="container nav">
         <a class="brand" href="<?= e(url()) ?>"><?php if ($logoPath !== ''): ?><img src="<?= e(url($logoPath)) ?>" alt="<?= e($companyName) ?> logo" style="height:38px;width:auto;max-width:140px;vertical-align:middle;">

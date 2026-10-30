@@ -45,15 +45,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Load conversations
 $conversations = $db->query(
-    'SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id AND m.sender_type = "visitor" AND m.is_read = 0) AS unread_count
-     FROM chat_conversations c WHERE c.status != "closed" ORDER BY c.updated_at DESC'
+    'SELECT c.*, s.tracking_number,
+            (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id AND m.sender_type = "visitor" AND m.is_read = 0) AS unread_count
+     FROM chat_conversations c
+     LEFT JOIN shipments s ON s.id = c.shipment_id
+     WHERE c.status != "closed" ORDER BY c.updated_at DESC'
 )->fetchAll();
 
 $selectedId = (int)($_GET['id'] ?? 0);
 $messages = [];
 $selectedConvo = null;
 if ($selectedId > 0) {
-    $selectedConvo = $db->prepare('SELECT * FROM chat_conversations WHERE id = ?');
+    $selectedConvo = $db->prepare(
+        'SELECT c.*, s.tracking_number
+         FROM chat_conversations c
+         LEFT JOIN shipments s ON s.id = c.shipment_id
+         WHERE c.id = ?'
+    );
     $selectedConvo->execute([$selectedId]);
     $selectedConvo = $selectedConvo->fetch();
     if ($selectedConvo) {
@@ -92,7 +100,7 @@ require dirname(__DIR__) . '/includes/admin_header.php';
             <?php foreach ($conversations as $c): ?>
                 <a href="<?= e(url('admin/chat.php?id=' . $c['id'])) ?>" style="display:block;padding:.85rem;border-bottom:1px solid var(--line);text-decoration:none;color:var(--ink);<?= $selectedId === (int)$c['id'] ? 'background:var(--paper);' : '' ?>">
                     <div style="display:flex;justify-content:space-between;align-items:center">
-                        <strong style="font-size:.95rem"><?= e($c['visitor_name']) ?></strong>
+                        <strong style="font-size:.95rem"><?= e($c['tracking_number'] ?: $c['visitor_name']) ?></strong>
                         <?php if ($c['unread_count'] > 0): ?>
                             <span style="display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;background:var(--brand);color:white;font-size:.75rem;font-weight:700;padding:0 5px"><?= (int)$c['unread_count'] ?></span>
                         <?php endif; ?>
@@ -108,7 +116,7 @@ require dirname(__DIR__) . '/includes/admin_header.php';
         <?php if ($selectedConvo): ?>
             <div style="padding:.85rem 1rem;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
                 <div>
-                    <strong><?= e($selectedConvo['visitor_name']) ?></strong>
+                    <strong><?= e($selectedConvo['tracking_number'] ?: $selectedConvo['visitor_name']) ?></strong>
                     <small style="color:var(--muted);margin-left:.5rem">Started <?= e(date('M j, Y g:ia', strtotime($selectedConvo['created_at']))) ?></small>
                 </div>
                 <form method="post" style="margin:0">

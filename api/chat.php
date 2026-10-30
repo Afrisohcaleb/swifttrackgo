@@ -1,216 +1,207 @@
 <?php
-/**
- * Chat API Endpoint for SwiftTrackGo Live Chat System
- *
- * Handles all chat operations:
- * - Starting new conversations (visitor name + first message)
- * - Sending subsequent messages
- * - Fetching conversation history
- *
- * Uses vanilla PHP with PDO for database operations
- * Follows existing SwiftTrackGo patterns (CSRF, error handling, etc.)
- */
-
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/includes/functions.php';
 
-// Set JSON response header
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
-// Initialize database connection
-$db = getDbConnection();
-$method = $_SERVER['REQUEST_METHOD'] ?? '';
-
-/**
- * Handle GET requests for fetching messages
- *
- * @param action - Should be 'messages'
- * @param conversation_id - Required ID of the conversation
- */
-if ($method === 'GET') {
-    $action = $_GET['action'] ?? '';
-
-    if ($action === 'status') {
-        $settings = getSiteSettingsSafe();
-        echo json_encode([
-            'enabled' => ($settings['livechat_enabled'] ?? '0') === '1',
-            'online' => ($settings['livechat_enabled'] ?? '0') === '1'
-                && ($settings['livechat_online'] ?? '0') === '1',
-        ]);
-        exit;
-    }
-
-    if ($action === 'messages') {
-        $conversationId = (int)($_GET['conversation_id'] ?? 0);
-        $sessionToken = (string)($_GET['session'] ?? '');
-
-        if ($conversationId < 1 || !preg_match('/^[a-f0-9]{32}$/', $sessionToken)) {
-            echo json_encode(['error' => 'Invalid conversation credentials']);
-            http_response_code(400);
-            exit;
-        }
-
-        try {
-            $conversation = $db->prepare(
-                'SELECT id FROM chat_conversations WHERE id = :id AND visitor_session = :session LIMIT 1'
-            );
-            $conversation->execute(['id' => $conversationId, 'session' => $sessionToken]);
-            if (!$conversation->fetch()) {
-                echo json_encode(['error' => 'Conversation not found']);
-                http_response_code(404);
-                exit;
-            }
-
-            $stmt = $db->prepare('SELECT message, sender_type, created_at FROM chat_messages WHERE conversation_id = ? ORDER BY created_at ASC');
-            $stmt->execute([$conversationId]);
-            $messages = $stmt->fetchAll();
-
-            $settings = getSiteSettingsSafe();
-            $online = ($settings['livechat_enabled'] ?? '0') === '1'
-                && ($settings['livechat_online'] ?? '0') === '1';
-
-            echo json_encode([
-                'messages' => $messages,
-                'online' => $online
-            ]);
-
-            exit;
-
-        } catch (PDOException $e) {
-            error_log('Chat messages fetch error: ' . $e->getMessage());
-            echo json_encode(['error' => 'Failed to fetch messages']);
-            http_response_code(500);
-            exit;
-        }
-    }
-
-    echo json_encode(['error' => 'Unknown action']);
-    http_response_code(400);
+function chatJsonResponse(array $data, int $status = 200): never
+{
+    http_response_code($status);
+    echo json_encode($data);
     exit;
 }
 
-/**
- * Handle POST requests for starting conversations and sending messages
- */
-if ($method === 'POST') {
+$method = $_SERVER['REQUEST_METHOD'] ?? '';
+if (!in_array($method, ['GET', 'POST'], true)) {
+    header('Allow: GET, POST');
+    chatJsonResponse(['error' => 'Method not allowed'], 405);
+}
+
+try {
+    $db = getDbConnection();
+
+    if ($method === 'GET') {
+        $action = (string)($_GET['action'] ?? '');
+        if ($action === 'status') {
+            $settings = getSiteSettingsSafe();
+            $enabled = ($settings['livechat_enabled'] ?? '0') === '1';
+            chatJsonResponse([
+                'enabled' => $enabled,
+                'online' => $enabled && ($settings['livechat_online'] ?? '0') === '1',
+            ]);
+        }
+
+        if ($action !== 'messages') {
+            chatJsonResponse(['error' => 'Unknown action'], 400);
+        }
+
+        $trackingNumber = strtoupper(trim((string)($_GET['tracking_number'] ?? '')));
+        if ($trackingNumber !== '' && strlen($trackingNumber) <= 40) {
+            $conversation = $db->prepare(
+                'SELECT c.id
+                 FROM chat_conversations c
+                 INNER JOIN shipments s ON s.id = c.shipment_id
+                 WHERE s.tracking_number = :tracking_number
+                 LIMIT 1'
+            );
+            $conversation->execute(['tracking_number' => $trackingNumber]);
+            $conversationId = $conversation->fetchColumn();
+            if (!$conversationId) {
+                chatJsonResponse(['error' => 'No chat was found for this tracking number.'], 404);
+            }
+        } else {
+            $conversationId = (int)($_GET['conversation_id'] ?? 0);
+            $sessionToken = (string)($_GET['session'] ?? '');
+            if ($conversationId < 1 || !preg_match('/^[a-f0-9]{32}$/', $sessionToken)) {
+                chatJsonResponse(['error' => 'Invalid conversation credentials.'], 400);
+            }
+
+            $legacyConversation = $db->prepare(
+                'SELECT id FROM chat_conversations
+                 WHERE id = :id AND visitor_session = :session AND shipment_id IS NULL
+                 LIMIT 1'
+            );
+            $legacyConversation->execute(['id' => $conversationId, 'session' => $sessionToken]);
+            if (!$legacyConversation->fetch()) {
+                chatJsonResponse(['error' => 'Conversation not found.'], 404);
+            }
+        }
+
+        $stmt = $db->prepare(
+            'SELECT message, sender_type, created_at
+             FROM chat_messages WHERE conversation_id = ?
+             ORDER BY created_at ASC, id ASC'
+        );
+        $stmt->execute([(int)$conversationId]);
+        $settings = getSiteSettingsSafe();
+        $enabled = ($settings['livechat_enabled'] ?? '0') === '1';
+        chatJsonResponse([
+            'messages' => $stmt->fetchAll(),
+            'online' => $enabled && ($settings['livechat_online'] ?? '0') === '1',
+        ]);
+    }
+
     $csrf = $_POST['csrf_token'] ?? '';
     if (!is_string($csrf) || !hash_equals(csrfToken(), $csrf)) {
-        echo json_encode(['error' => 'Your session expired. Refresh the page and try again.']);
-        http_response_code(403);
-        exit;
+        chatJsonResponse(['error' => 'Your session expired. Refresh the page and try again.'], 403);
     }
 
-    $action = $_POST['action'] ?? '';
-
+    $action = (string)($_POST['action'] ?? '');
     if ($action === 'start') {
-        $chatSettings = getSiteSettingsSafe();
-        if (($chatSettings['livechat_enabled'] ?? '0') !== '1') {
-            echo json_encode(['error' => 'Live chat is currently unavailable.']);
-            http_response_code(503);
-            exit;
+        $settings = getSiteSettingsSafe();
+        if (($settings['livechat_enabled'] ?? '0') !== '1') {
+            chatJsonResponse(['error' => 'Live chat is currently unavailable.'], 503);
         }
 
-        // Start new conversation
-        $name = trim((string)($_POST['name'] ?? ''));
+        $trackingNumber = strtoupper(trim((string)($_POST['tracking_number'] ?? '')));
         $message = trim((string)($_POST['message'] ?? ''));
-
-        // Validate input
-        if (empty($name) || empty($message) || mb_strlen($name) > 100 || mb_strlen($message) > 2000) {
-            echo json_encode(['error' => 'Name and message are required']);
-            http_response_code(400);
-            exit;
+        if ($trackingNumber === '' || strlen($trackingNumber) > 40
+            || !preg_match('/^[A-Z0-9-]+$/', $trackingNumber)
+            || mb_strlen($message) > 2000) {
+            chatJsonResponse(['error' => 'Enter a valid tracking number and a message of at most 2,000 characters.'], 400);
         }
 
-        // Sanitize inputs
-        $name = mb_substr($name, 0, 100);
-        $message = mb_substr($message, 0, 2000);
+        $shipment = $db->prepare('SELECT id FROM shipments WHERE tracking_number = :tracking_number LIMIT 1');
+        $shipment->execute(['tracking_number' => $trackingNumber]);
+        $shipmentId = $shipment->fetchColumn();
+        if (!$shipmentId) {
+            chatJsonResponse(['error' => 'We could not find a shipment with that tracking number.'], 404);
+        }
 
-        try {
-            // Generate session ID for visitor tracking
+        $db->beginTransaction();
+        $existing = $db->prepare(
+            'SELECT id FROM chat_conversations WHERE shipment_id = ? LIMIT 1 FOR UPDATE'
+        );
+        $existing->execute([(int)$shipmentId]);
+        $conversationId = $existing->fetchColumn();
+        if ($conversationId) {
+            $conversationId = (int)$conversationId;
+            $db->prepare(
+                'UPDATE chat_conversations
+                 SET status = :status, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = :id'
+            )->execute(['status' => 'active', 'id' => $conversationId]);
+        } elseif ($message === '') {
+            $db->rollBack();
+            chatJsonResponse(['error' => 'Send a message to start a chat for this shipment.'], 400);
+        } else {
             $sessionId = bin2hex(random_bytes(16));
-
-            // Insert new conversation
-            $stmt = $db->prepare('INSERT INTO chat_conversations (visitor_name, visitor_session, status) VALUES (?, ?, ?)');
-            $stmt->execute([$name, $sessionId, 'active']);
-            $conversationId = (int)$db->lastInsertId();
-
-            // Insert first message
-            $stmt = $db->prepare('INSERT INTO chat_messages (conversation_id, sender_type, message) VALUES (?, ?, ?)');
-            $stmt->execute([$conversationId, 'visitor', $message]);
-
-            echo json_encode([
-                'conversation_id' => $conversationId,
-                'session' => $sessionId,
-                'message' => $message
-            ]);
-
-            exit;
-
-        } catch (PDOException $e) {
-            error_log('Chat start error: ' . $e->getMessage());
-            echo json_encode(['error' => 'Failed to start conversation']);
-            http_response_code(500);
-            exit;
-        }
-
-    } elseif ($action === 'send') {
-        // Send message to existing conversation
-        $conversationId = (int)($_POST['conversation_id'] ?? 0);
-        $sessionToken = (string)($_POST['session'] ?? '');
-        $message = trim((string)($_POST['message'] ?? ''));
-
-        if ($conversationId < 1 || !preg_match('/^[a-f0-9]{32}$/', $sessionToken) || empty($message)) {
-            echo json_encode(['error' => 'Invalid conversation credentials or empty message']);
-            http_response_code(400);
-            exit;
-        }
-
-        $message = mb_substr($message, 0, 2000);
-
-        try {
-            // Verify conversation exists and is active
-            $checkStmt = $db->prepare(
-                'SELECT id FROM chat_conversations
-                 WHERE id = :id AND visitor_session = :session AND status = :status'
+            $insert = $db->prepare(
+                'INSERT INTO chat_conversations (shipment_id, visitor_name, visitor_session, status)
+                 VALUES (:shipment_id, :tracking_number, :visitor_session, :status)
+                 ON DUPLICATE KEY UPDATE
+                    id = LAST_INSERT_ID(id),
+                    status = VALUES(status),
+                    updated_at = CURRENT_TIMESTAMP'
             );
-            $checkStmt->execute(['id' => $conversationId, 'session' => $sessionToken, 'status' => 'active']);
+            $insert->execute([
+                'shipment_id' => (int)$shipmentId,
+                'tracking_number' => $trackingNumber,
+                'visitor_session' => $sessionId,
+                'status' => 'active',
+            ]);
+            $conversationId = (int)$db->lastInsertId();
+        }
 
-            if (!$checkStmt->fetch()) {
-                echo json_encode(['error' => 'Conversation not found or closed']);
-                http_response_code(404);
-                exit;
-            }
-
-            // Insert message
-            $stmt = $db->prepare('INSERT INTO chat_messages (conversation_id, sender_type, message) VALUES (?, ?, ?)');
-            $stmt->execute([$conversationId, 'visitor', $message]);
-
-            // Update conversation timestamp
+        if ($message !== '') {
+            $db->prepare(
+                'INSERT INTO chat_messages (conversation_id, sender_type, message)
+                 VALUES (?, ?, ?)'
+            )->execute([$conversationId, 'visitor', mb_substr($message, 0, 2000)]);
             $db->prepare('UPDATE chat_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?')
                ->execute([$conversationId]);
-
-            echo json_encode([
-                'success' => true,
-                'message' => $message,
-                'conversation_id' => $conversationId
-            ]);
-
-            exit;
-
-        } catch (PDOException $e) {
-            error_log('Chat send error: ' . $e->getMessage());
-            echo json_encode(['error' => 'Failed to send message']);
-            http_response_code(500);
-            exit;
         }
+        $db->commit();
+
+        chatJsonResponse([
+            'conversation_id' => $conversationId,
+            'tracking_number' => $trackingNumber,
+        ]);
     }
 
-    echo json_encode(['error' => 'Unknown action']);
-    http_response_code(400);
-    exit;
-}
+    if ($action === 'send') {
+        $trackingNumber = strtoupper(trim((string)($_POST['tracking_number'] ?? '')));
+        $message = trim((string)($_POST['message'] ?? ''));
+        if ($trackingNumber === '' || strlen($trackingNumber) > 40
+            || !preg_match('/^[A-Z0-9-]+$/', $trackingNumber)
+            || $message === '' || mb_strlen($message) > 2000) {
+            chatJsonResponse(['error' => 'Enter a valid tracking number and message.'], 400);
+        }
 
-// Method not allowed
-http_response_code(405);
-echo json_encode(['error' => 'Method not allowed']);
+        $conversation = $db->prepare(
+            'SELECT c.id
+             FROM chat_conversations c
+             INNER JOIN shipments s ON s.id = c.shipment_id
+             WHERE s.tracking_number = :tracking_number
+             LIMIT 1'
+        );
+        $conversation->execute(['tracking_number' => $trackingNumber]);
+        $conversationId = $conversation->fetchColumn();
+        if (!$conversationId) {
+            chatJsonResponse(['error' => 'No active chat was found for this tracking number. Reopen the chat to continue.'], 404);
+        }
+
+        $db->beginTransaction();
+        $db->prepare(
+            'INSERT INTO chat_messages (conversation_id, sender_type, message)
+             VALUES (?, ?, ?)'
+        )->execute([(int)$conversationId, 'visitor', mb_substr($message, 0, 2000)]);
+        $db->prepare(
+            'UPDATE chat_conversations
+             SET status = :status, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id'
+        )->execute(['status' => 'active', 'id' => (int)$conversationId]);
+        $db->commit();
+
+        chatJsonResponse(['success' => true, 'conversation_id' => (int)$conversationId]);
+    }
+
+    chatJsonResponse(['error' => 'Unknown action.'], 400);
+} catch (Throwable $exception) {
+    if (isset($db) && $db instanceof PDO && $db->inTransaction()) {
+        $db->rollBack();
+    }
+    error_log('SwiftTrackGo chat request failed: ' . $exception->getMessage());
+    chatJsonResponse(['error' => 'The chat service is temporarily unavailable. Please try again later.'], 500);
+}

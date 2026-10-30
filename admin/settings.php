@@ -30,31 +30,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $brandFields = ['logo_path', 'dashboard_logo_path', 'favicon_path', 'hero_background_path', 'page_background_path'];
+    $uploadedAssets = [];
     foreach ($brandFields as $field) {
-        if (!empty($_FILES[$field]['name'])) {
+        $uploadError = $_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE;
+        if ($uploadError !== UPLOAD_ERR_NO_FILE) {
+            if ($uploadError !== UPLOAD_ERR_OK) {
+                $errors[] = match ($uploadError) {
+                    UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'The uploaded asset for ' . str_replace('_path', '', $field) . ' exceeds the server upload limit.',
+                    UPLOAD_ERR_PARTIAL => 'The upload for ' . str_replace('_path', '', $field) . ' was interrupted. Try again.',
+                    UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE => 'The server could not store the upload for ' . str_replace('_path', '', $field) . '. Contact the site administrator.',
+                    default => 'The upload for ' . str_replace('_path', '', $field) . ' failed. Try again.',
+                };
+                continue;
+            }
+
             $destination = $field === 'favicon_path' ? 'assets/logos' : ($field === 'dashboard_logo_path' ? 'assets/logos' : ($field === 'hero_background_path' || $field === 'page_background_path' ? 'assets/backgrounds' : 'assets/logos'));
             $uploaded = uploadBrandAsset($_FILES[$field], $destination);
             if ($uploaded === null) {
-                $errors[] = 'The uploaded asset for ' . str_replace('_path', '', $field) . ' is invalid or too large.';
+                $errors[] = 'The ' . str_replace('_path', '', $field) . ' must be a valid JPG, PNG, GIF, or WebP image no larger than ' . number_format(UPLOAD_MAX_SIZE / 1048576, 1) . ' MB.';
             } else {
                 $updates[$field] = $uploaded;
+                $uploadedAssets[] = $uploaded;
             }
         }
     }
 
     if (!$errors) {
-        saveSiteSettings($db, $updates);
-        $settings = getSiteSettingsSafe();
-        flash('success', 'Branding and site settings updated.');
-        redirect('admin/settings.php');
+        try {
+            $db->beginTransaction();
+            saveSiteSettings($db, $updates);
+            $db->commit();
+            flash('success', 'Branding and site settings updated.');
+            redirect('admin/settings.php');
+        } catch (Throwable $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            foreach ($uploadedAssets as $uploadedAsset) {
+                if (!deleteUploadedAsset($uploadedAsset)) {
+                    error_log('SwiftTrackGo failed to remove an unsaved branding upload: ' . $uploadedAsset);
+                }
+            }
+            error_log('SwiftTrackGo branding settings save failed: ' . $exception->getMessage());
+            $errors[] = 'Settings could not be saved. Please try again.';
+        }
+    } else {
+        foreach ($uploadedAssets as $uploadedAsset) {
+            if (!deleteUploadedAsset($uploadedAsset)) {
+                error_log('SwiftTrackGo failed to remove an invalid branding upload: ' . $uploadedAsset);
+            }
+        }
     }
 }
 
 $pageTitle = 'Website settings';
 require dirname(__DIR__) . '/includes/admin_header.php';
+$imageFields = [
+    'logo_path' => 'Primary logo image',
+    'dashboard_logo_path' => 'Dashboard logo image',
+    'favicon_path' => 'Favicon',
+    'hero_background_path' => 'Hero background',
+    'page_background_path' => 'Page background',
+];
 ?>
 <h1>Website settings</h1>
 <?php foreach ($errors as $error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endforeach; ?>
+<p class="muted">Images are JPG, PNG, GIF, or WebP, up to <?= e(number_format(UPLOAD_MAX_SIZE / 1048576, 1)) ?> MB each. Choose a new file to replace an image; leaving the file picker empty keeps the saved image.</p>
 <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="<?= e(csrfToken()) ?>">
     <div class="form-grid">
@@ -66,11 +107,20 @@ require dirname(__DIR__) . '/includes/admin_header.php';
         <div class="field"><label for="theme_primary">Primary color</label><input id="theme_primary" name="theme_primary" type="color" value="<?= e($settings['theme_primary']) ?>"></div>
         <div class="field"><label for="theme_secondary">Secondary color</label><input id="theme_secondary" name="theme_secondary" type="color" value="<?= e($settings['theme_secondary']) ?>"></div>
         <div class="field"><label for="theme_accent">Accent color</label><input id="theme_accent" name="theme_accent" type="color" value="<?= e($settings['theme_accent']) ?>"></div>
-        <div class="field"><label for="logo_path">Primary logo image</label><input id="logo_path" type="file" name="logo_path" accept="image/png,image/jpeg,image/gif,image/webp"></div>
-        <div class="field"><label for="dashboard_logo_path">Dashboard logo image</label><input id="dashboard_logo_path" type="file" name="dashboard_logo_path" accept="image/png,image/jpeg,image/gif,image/webp"></div>
-        <div class="field"><label for="favicon_path">Favicon</label><input id="favicon_path" type="file" name="favicon_path" accept="image/png,image/jpeg,image/gif,image/webp"></div>
-        <div class="field"><label for="hero_background_path">Hero background</label><input id="hero_background_path" type="file" name="hero_background_path" accept="image/png,image/jpeg,image/gif,image/webp"></div>
-        <div class="field"><label for="page_background_path">Page background</label><input id="page_background_path" type="file" name="page_background_path" accept="image/png,image/jpeg,image/gif,image/webp"></div>
+        <?php foreach ($imageFields as $field => $label): ?>
+            <div class="field">
+                <label for="<?= e($field) ?>"><?= e($label) ?></label>
+                <input id="<?= e($field) ?>" type="file" name="<?= e($field) ?>" accept="image/png,image/jpeg,image/gif,image/webp">
+                <?php if (!empty($settings[$field])): ?>
+                    <a class="settings-image-preview" href="<?= e(url($settings[$field])) ?>" target="_blank" rel="noopener">
+                        <img src="<?= e(url($settings[$field])) ?>" alt="Current <?= e(mb_strtolower($label)) ?>" loading="lazy">
+                        <small>Saved: <?= e(basename($settings[$field])) ?></small>
+                    </a>
+                <?php else: ?>
+                    <small class="muted">No image saved yet.</small>
+                <?php endif; ?>
+            </div>
+        <?php endforeach; ?>
         <div class="field field-full">
             <label style="display:inline-flex;align-items:center;gap:.5rem;cursor:pointer">
                 <input type="checkbox" name="livechat_enabled" value="1" <?= ($settings['livechat_enabled'] ?? '0') === '1' ? 'checked' : '' ?> style="width:auto">

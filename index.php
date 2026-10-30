@@ -76,9 +76,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
 }
 
 $pageTitle = 'Shipment tracking made simple';
+$heroBackgroundPath = getSiteSettingsSafe()['hero_background_path'] ?: '';
+$heroBackgroundStyle = $heroBackgroundPath !== ''
+    ? '--hero-background:url(' . json_encode(url($heroBackgroundPath), JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP) . ')'
+    : '';
 require __DIR__ . '/includes/header.php';
 ?>
-<section class="hero">
+<section class="hero<?= $heroBackgroundStyle !== '' ? ' hero-with-background' : '' ?>"<?= $heroBackgroundStyle !== '' ? ' style="' . e($heroBackgroundStyle) . '"' : '' ?>>
     <div class="container hero-grid">
         <div>
             <span class="eyebrow">Shipping, without the guesswork</span>

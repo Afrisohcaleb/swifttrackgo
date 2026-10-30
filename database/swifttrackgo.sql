@@ -108,13 +108,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 -- Live chat conversations & messages
 CREATE TABLE IF NOT EXISTS chat_conversations (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    shipment_id BIGINT UNSIGNED NULL,
     visitor_name VARCHAR(100) NOT NULL,
     visitor_session VARCHAR(64) NOT NULL,
     status ENUM('active', 'closed') NOT NULL DEFAULT 'active',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_chat_conversations_shipment (shipment_id),
     INDEX idx_chat_conversations_status (status),
-    INDEX idx_chat_conversations_updated (updated_at)
+    INDEX idx_chat_conversations_updated (updated_at),
+    CONSTRAINT fk_chat_conversations_shipment FOREIGN KEY (shipment_id) REFERENCES shipments(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS chat_messages (

@@ -249,7 +249,7 @@ function deleteUploadedAsset(?string $relativePath): bool
     }
 
     $normalized = str_replace('\\', '/', $relativePath);
-    if (!preg_match('#^assets/images/brand_[a-f0-9]{16}\.(?:jpg|png|gif|webp)$#', $normalized)) {
+    if (!preg_match('#^assets/(?:images|logos|backgrounds)/brand_[a-f0-9]{16}\.(?:jpg|png|gif|webp)$#', $normalized)) {
         return false;
     }
 
